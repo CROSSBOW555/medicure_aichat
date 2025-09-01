@@ -3,19 +3,31 @@ import json
 from flask import Flask, render_template, request, jsonify
 import requests
 from datetime import datetime
+from pymongo import MongoClient
 
 # --- Configuration ---
-# We will get the API key from Render's environment variables for security.
+# Get secrets from Render's environment variables
 API_KEY = os.environ.get("GEMINI_API_KEY")
+MONGO_URI = os.environ.get("MONGO_URI")
+
+# --- Database Setup ---
+if not MONGO_URI:
+    print("FATAL ERROR: MONGO_URI is not set in the environment.")
+    # Exit or handle gracefully if the URI is not found
+    # For simplicity, we'll let it fail on connection attempt
+    
+client = MongoClient(MONGO_URI)
+db = client.ai_companion_db # Your database name
+appointments_collection = db.appointments # Your collection (table) name
 
 # Initialize the Flask application
 app = Flask(__name__, template_folder='.')
 
 # --- Gemini API Helper Function ---
+# (This function remains unchanged from the previous version)
 def make_gemini_api_call(payload):
     """Makes a request to the Gemini API and returns the JSON response."""
     if not API_KEY:
-        # This will be logged on Render if the key is missing
         print("ERROR: Gemini API key is not set in the environment.")
         raise ValueError("Gemini API key is not configured on the server.")
     
@@ -50,6 +62,7 @@ def make_gemini_api_call(payload):
         raise ValueError(f"Could not parse valid JSON from Gemini response.")
 
 # --- AI Logic Functions ---
+# (call_data_cleaning_ai and call_triage_ai remain unchanged)
 def call_data_cleaning_ai(raw_data):
     """Calls Gemini to clean and format raw user data."""
     system_prompt = """You are a data cleaning and formatting expert. Your task is to take raw, conversational user input and convert it into a structured, clean JSON object.
@@ -109,17 +122,13 @@ def index():
 
 @app.route('/process', methods=['POST'])
 def process_data():
-    """Receives user data, processes it with AI, and saves the result."""
+    """Receives user data, processes it with AI, and saves the result to MongoDB."""
     try:
         raw_data = request.json.get('userData')
         if not raw_data:
-            print("ERROR: No user data received in request.")
             return jsonify({"error": "No user data provided."}), 400
 
-        print("\n--- Stage 1: Cleaning Data ---")
         cleaned_data = call_data_cleaning_ai(raw_data)
-        
-        print("\n--- Stage 2: Performing Triage ---")
         triage_result = call_triage_ai(cleaned_data)
 
         final_appointment_data = {
@@ -131,12 +140,9 @@ def process_data():
             "bookingTimestampUTC": datetime.utcnow().isoformat()
         }
 
-        # On Render, this saves to a temporary filesystem
-        file_name = f"appointment_{cleaned_data.get('name', 'user').replace(' ', '_')}_{datetime.now().strftime('%Y%m%d%H%M%S')}.json"
-        with open(file_name, 'w') as f:
-            json.dump(final_appointment_data, f, indent=4)
-        
-        print(f"\n--- Success! Saved appointment to {file_name} ---")
+        # *** NEW: Save to MongoDB instead of a file ***
+        insert_result = appointments_collection.insert_one(final_appointment_data)
+        print(f"\n--- Success! Saved appointment to MongoDB with ID: {insert_result.inserted_id} ---")
 
         return jsonify(triage_result)
 
@@ -146,7 +152,4 @@ def process_data():
     except Exception as e:
         print(f"An unexpected error occurred: {e}")
         return jsonify({"error": "An unexpected server error occurred."}), 500
-
-# Note: The if __name__ == '__main__': block is removed, 
-# as Gunicorn will run the 'app' object directly.
 
