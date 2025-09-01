@@ -1,0 +1,263 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Companion - MediCure</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        .custom-scrollbar::-webkit-scrollbar { width: 6px; }
+        .custom-scrollbar::-webkit-scrollbar-track { background: #f1f1f1; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: #888; border-radius: 3px; }
+        .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: #555; }
+        .dot-flashing {
+            position: relative; width: 6px; height: 6px; border-radius: 5px;
+            background-color: #9880ff; color: #9880ff;
+            animation: dotFlashing 1s infinite linear alternate;
+            animation-delay: .5s;
+        }
+        .dot-flashing::before, .dot-flashing::after { content: ''; display: inline-block; position: absolute; top: 0; }
+        .dot-flashing::before {
+            left: -10px; width: 6px; height: 6px; border-radius: 5px;
+            background-color: #9880ff; color: #9880ff;
+            animation: dotFlashing 1s infinite alternate; animation-delay: 0s;
+        }
+        .dot-flashing::after {
+            left: 10px; width: 6px; height: 6px; border-radius: 5px;
+            background-color: #9880ff; color: #9880ff;
+            animation: dotFlashing 1s infinite alternate; animation-delay: 1s;
+        }
+        @keyframes dotFlashing {
+            0% { background-color: #a7a7a7; }
+            50%, 100% { background-color: #6d6d6d; }
+        }
+    </style>
+</head>
+<body class="bg-gray-100 flex items-center justify-center min-h-screen p-4">
+
+    <div class="w-full max-w-2xl bg-white rounded-2xl shadow-2xl flex flex-col" style="height: 90vh; max-height: 700px;">
+        <div class="p-5 border-b border-gray-200">
+            <h1 class="text-2xl font-bold text-gray-800">AI Companion</h1>
+            <p class="text-sm text-gray-500 mt-1">Powered by Python & Google Gemini</p>
+        </div>
+
+        <div id="chat-window" class="flex-1 p-6 overflow-y-auto custom-scrollbar flex flex-col space-y-4"></div>
+
+        <div id="thinking-indicator" class="p-4 border-t border-gray-200 hidden">
+             <div class="flex items-center space-x-3">
+                <div class="w-10 h-10 rounded-full bg-blue-500 flex items-center justify-center text-white font-bold">AI</div>
+                <div class="flex items-center space-x-2">
+                     <span id="thinking-text" class="text-gray-500 italic">AI is analyzing your information...</span>
+                     <div class="dot-flashing"></div>
+                </div>
+            </div>
+        </div>
+
+        <div id="action-area" class="p-4 bg-white border-t border-gray-200">
+            <form id="chat-form" class="flex items-center space-x-3">
+                <input type="text" id="user-input" placeholder="Type your message..." class="w-full p-3 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 transition" autocomplete="off">
+                <button type="submit" class="bg-blue-600 text-white p-3 rounded-xl hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 transition disabled:bg-gray-400 disabled:cursor-not-allowed">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" viewBox="0 0 20 20" fill="currentColor"><path d="M10.894 2.553a1 1 0 00-1.788 0l-7 14a1 1 0 001.169 1.409l5-1.429A1 1 0 009 15.571V11a1 1 0 112 0v4.571a1 1 0 00.725.962l5 1.428a1 1 0 001.17-1.408l-7-14z" /></svg>
+                </button>
+            </form>
+        </div>
+    </div>
+
+    <script>
+        const chatWindow = document.getElementById('chat-window');
+        const chatForm = document.getElementById('chat-form');
+        const userInput = document.getElementById('user-input');
+        const submitButton = chatForm.querySelector('button');
+        const thinkingIndicator = document.getElementById('thinking-indicator');
+        const thinkingText = document.getElementById('thinking-text');
+        
+        const questionGroups = [
+            {
+                name: 'personal',
+                intro: "Let's start with some basic details to set up your profile.",
+                questions: [
+                    { key: 'name', prompts: ["First, what is your full name?", "Could you please tell me your full name?", "Let's begin. What's your name?"] },
+                    { key: 'dob', prompts: ["Thank you, {name}. What is your date of birth?", "Got it. And your date of birth?", "Could you provide your date of birth, please?"] },
+                    { key: 'gender', prompts: ["What is your gender?", "What gender do you identify as?", "Next, please tell me your gender."] },
+                    { key: 'phone', prompts: ["What is a good phone number to reach you at?", "What's the best contact number for you?", "Can I get your phone number, please?"] },
+                    { key: 'email', prompts: ["And your email address, please?", "What's your email address?", "I'll need an email address to send the confirmation to."] },
+                    { key: 'address', prompts: ["What is your current home address?", "Could you provide your full address?", "Where are you currently living?"] }
+                ]
+            },
+            {
+                name: 'symptoms',
+                intro: "Great, thank you. Now, let's talk about the reason for your visit.",
+                questions: [ { key: 'symptoms', prompts: ["Please describe your main symptoms.", "Could you tell me what symptoms you are experiencing?", "What seems to be the trouble today? Please describe your symptoms."] } ]
+            },
+            {
+                name: 'history',
+                intro: "Understood. Now I have a few questions about your medical background.",
+                questions: [
+                    { key: 'conditions', prompts: ["Do you have any past or chronic medical conditions? (e.g., Diabetes, Hypertension)", "Do you have any other chronic conditions I should be aware of?", "Please list any other medical conditions you have."] },
+                    { key: 'history', prompts: ["Is there any significant medical history in your family that we should be aware of?", "Tell me about any important family medical history.", "Any relevant medical history from your family?"] },
+                    { key: 'medications', prompts: ["Are you currently taking any medications? If not, just say 'None'.", "Do you take any regular medications?", "Please list any medications you're currently on."] },
+                    { key: 'allergies', prompts: ["Do you have any known allergies?", "Are you allergic to anything, like medications or food?", "I need to know about any allergies you have."] }
+                ]
+            },
+            {
+                name: 'booking',
+                intro: "Perfect, we're almost done. Let's find a suitable time for your appointment.",
+                questions: [
+                    { key: 'date', prompts: ["What is your preferred date for the appointment?", "What date would you like to book your appointment for?", "When would you like to come in?"] },
+                    { key: 'time', prompts: ["And what time of day works best for you? (e.g., Morning, Afternoon, 2:00 PM)", "What time is convenient for you?", "And a preferred time for the appointment?"] }
+                ]
+            }
+        ];
+
+        let conversationState = 'idle';
+        let currentGroupIndex = 0;
+        let currentQuestionIndex = 0;
+        let userData = {};
+        
+        function displayMessage(message, sender) {
+            const messageWrapper = document.createElement('div');
+            messageWrapper.classList.add('flex', 'items-start', 'max-w-lg');
+            let messageElement;
+            if (sender === 'ai') {
+                messageWrapper.classList.add('self-start');
+                messageElement = `<div class="w-10 h-10 rounded-full bg-blue-500 flex items-center justify-center text-white font-bold flex-shrink-0">AI</div><div class="ml-3 bg-gray-100 p-3 rounded-r-lg rounded-bl-lg"><div class="text-sm text-gray-800">${message}</div></div>`;
+            } else {
+                messageWrapper.classList.add('self-end');
+                messageElement = `<div class="mr-3 bg-blue-600 p-3 rounded-l-lg rounded-br-lg"><p class="text-sm text-white">${message}</p></div><div class="w-10 h-10 rounded-full bg-gray-300 flex items-center justify-center text-gray-600 font-bold flex-shrink-0">You</div>`;
+            }
+            messageWrapper.innerHTML = messageElement;
+            chatWindow.appendChild(messageWrapper);
+            chatWindow.scrollTop = chatWindow.scrollHeight;
+        }
+        
+        function askQuestion() {
+            const group = questionGroups[currentGroupIndex];
+            const question = group.questions[currentQuestionIndex];
+            let questionText = question.prompts[Math.floor(Math.random() * question.prompts.length)];
+            if(questionText.includes('{name}') && userData.name) {
+                questionText = questionText.replace('{name}', userData.name.split(' ')[0]);
+            }
+            setTimeout(() => {
+                displayMessage(questionText, 'ai');
+                conversationState = 'asking';
+                userInput.disabled = false;
+                userInput.focus();
+                submitButton.disabled = false;
+            }, 800);
+        }
+
+        function advanceConversation() {
+            const currentGroup = questionGroups[currentGroupIndex];
+            currentQuestionIndex++;
+            if (currentQuestionIndex >= currentGroup.questions.length) {
+                currentGroupIndex++;
+                currentQuestionIndex = 0;
+                if (currentGroupIndex >= questionGroups.length) {
+                    processAllData();
+                } else {
+                    const nextGroup = questionGroups[currentGroupIndex];
+                    displayMessage(nextGroup.intro, 'ai');
+                    askQuestion();
+                }
+            } else {
+                askQuestion();
+            }
+        }
+
+        async function processAllData() {
+            conversationState = 'processing';
+            submitButton.disabled = true;
+            userInput.disabled = true;
+            userInput.placeholder = "Processing...";
+            thinkingText.textContent = "AI is processing your information...";
+            thinkingIndicator.classList.remove('hidden');
+
+            try {
+                const response = await fetch('/process', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ userData: userData })
+                });
+
+                thinkingIndicator.classList.add('hidden');
+
+                if (!response.ok) {
+                    const errorResult = await response.json();
+                    throw new Error(errorResult.error || 'An unknown error occurred.');
+                }
+
+                const triageResult = await response.json();
+                
+                const confirmationMessage = `Based on my analysis, I have referred you to the <b>${triageResult.department}</b> department.<br><br>I have booked an appointment for you on your preferred date and time. You will receive a final confirmation via email and SMS shortly.<br><br><b>General Precautions from our AI:</b><br>${triageResult.precautions}`;
+                displayMessage(confirmationMessage, 'ai');
+                
+                setTimeout(() => {
+                    displayMessage("Do you need to book another appointment? (Please type 'yes' or 'no')", 'ai');
+                    conversationState = 'ended';
+                    userInput.disabled = false;
+                    userInput.placeholder = "Type 'yes' or 'no'...";
+                    userInput.focus();
+                }, 1500);
+
+            } catch (error) {
+                console.error("Processing Error:", error);
+                thinkingIndicator.classList.add('hidden');
+                displayMessage(`I'm sorry, I encountered an error: ${error.message}. Please try again later.`, 'ai');
+                conversationState = 'ended';
+            }
+        }
+
+        function resetConversation() {
+            chatWindow.innerHTML = '';
+            userInput.placeholder = "Type your message...";
+            userInput.value = '';
+            currentGroupIndex = 0;
+            currentQuestionIndex = 0;
+            userData = {};
+            startConversation();
+        }
+
+        function startConversation() {
+            userInput.disabled = true;
+            submitButton.disabled = true;
+            setTimeout(() => {
+                displayMessage("Hello! I am your AI Companion from MediCure, here to help you book your appointment quickly and easily.", 'ai');
+                setTimeout(() => {
+                    displayMessage(questionGroups[0].intro, 'ai');
+                    askQuestion();
+                }, 1200);
+            }, 1000);
+        }
+
+        chatForm.addEventListener('submit', (e) => {
+            e.preventDefault();
+            const message = userInput.value.trim();
+            if (!message || conversationState === 'processing') return;
+            displayMessage(message, 'user');
+            userInput.value = '';
+            if (conversationState === 'asking') {
+                const currentGroup = questionGroups[currentGroupIndex];
+                const currentQuestionKey = currentGroup.questions[currentQuestionIndex].key;
+                userData[currentQuestionKey] = message;
+                submitButton.disabled = true;
+                userInput.disabled = true;
+                advanceConversation();
+            } else if (conversationState === 'ended') {
+                if (message.toLowerCase() === 'yes') {
+                    resetConversation();
+                } else {
+                    displayMessage("Thank you for using the AI Companion. Have a great day!", 'ai');
+                    userInput.disabled = true;
+                    userInput.placeholder = 'Session finished.';
+                }
+            }
+        });
+
+        window.onload = startConversation;
+    </script>
+</body>
+</html>
